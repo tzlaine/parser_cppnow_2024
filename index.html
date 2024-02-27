@@ -27,7 +27,361 @@
 
 ----
 
-### Why a New Parser Library?
+### Why a new parser library?
+
+----
+
+The short answer:
+
+Spirit 2 is great, but it is written using C++98 techology.  Spirit X3 is a
+modernized, experimental update that is not fully documented, but has a single
+design decision that makes it unusable for me.
+
+My love of these libraries and my frustration with this staus quo led to my
+writing Boost.Parser.
+<!-- .element: class="fragment" -->
+
+----
+
+The longer answer is that ...
+
+----
+
+Spirit 2:
+
+- Suffers from very long compile times
+<!-- .element: class="fragment" -->
+- Has error reporting that requires a lot of user intervention to work
+<!-- .element: class="fragment" -->
+- Requires user intervention, including a (long) recompile, to enable parse tracing
+<!-- .element: class="fragment" -->
+
+----
+
+Spirit X3:
+
+- Has rules that do not compose well -- the attributes produced by a rule can change depending on the context in which you use the rule
+<!-- .element: class="fragment" -->
+- Is missing many of the convenient interfaces to parsers that Spirit 2 had
+<!-- .element: class="fragment" -->
+
+----
+
+Both libraries:
+
+- Have Unicode support, but it is quite difficult to get working
+<!-- .element: class="fragment" -->
+- Are ranges-unfriendly
+<!-- .element: class="fragment" -->
+
+----
+
+On the positive side, both libraries:
+
+- Share the same rich set of parsers and combining operations
+<!-- .element: class="fragment" -->
+- Have nice semantics for how to get values out of a parse operation
+<!-- .element: class="fragment" -->
+- Are fun to use
+<!-- .element: class="fragment" -->
+
+----
+
+So, the goal is to create a library in the same style as the Spirit libraries,
+updated for newer C++ standards.
+
+The new library should also try to improve and simplify the interface
+whererver possible.
+<!-- .element: class="fragment" -->
+
+Just as importantly, the new library must retain the fun.
+<!-- .element: class="fragment" -->
+
+----
+
+### The big picture
+
+----
+
+```c++
+#include <boost/parser/parser.hpp>
+#include <iostream>
+#include <string>
+int main(int argc, char const * argv[]) {
+    namespace bp = boost::parser;
+    auto const result =
+        bp::parse(argv[1], bp::double_ % ',', bp::ws);
+    if (result) {
+        for (double x : *result)
+            std::cout << x << "\n";
+    } else {
+        std::cout << "Parse failed.\n";
+    }
+}
+```
+
+----
+
+Parser consists of these elements:
+
+<ul>
+<li>First-order parsers (e.g. `int_`)</li>
+<!-- .element: class="fragment" -->
+<li>Operator overloads (e.g. `*` for Kleene star)</li>
+<!-- .element: class="fragment" -->
+<li>Second-order parsers/directives (e.g. `if_(cond)[p]` or `string_view[p]`)</li>
+<!-- .element: class="fragment" -->
+<li>Semantic actions</li>
+<!-- .element: class="fragment" -->
+<li>Rules</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+Using an operator overload or second-order parser on one or more existing
+parsers makes a new parser.
+
+----
+
+For example, the `>>` operator puts two parsers together to make a new parser
+that parses the left parser, and then, if successful, parses the right parser.
+Here, `int_`, `double_`, and `parser` are all parsers.  The first two are
+provided by Parser, the third you see defined here.
+
+```c++
+namespace bp = boost::parser;
+constexpr auto parser = bp::int_ >> bp::double_;
+```
+
+Any parser has all the operator overloads defined for it, and can be used in
+any of the second-order parsers.
+<!-- .element: class="fragment" -->
+
+----
+
+Every Parser-provided parser is small, and does not allocate.  Many of them
+are monostates.
+
+Each parser is an invocable object with two `call()` overloads.
+<!-- .element: class="fragment" -->
+
+----
+
+Every parser has an associated attribute type.  An attribute is a value that
+is produced as a result of the parse.  For example, our earlier parser has an
+attribute type of `bp::tuple<int, double>`.
+
+```c++
+constexpr auto parser = bp::int_ >> bp::double_;
+```
+
+----
+
+A parser might have no attribute associated with it.  It's attribute type is
+not `void`, but a special not-an-atribute type `none`.  The lack of
+`void`-producing parsers keeps the Parser logic simpler.
+
+----
+
+Once you have a parser, you use it by passing it to `parse()`.
+
+```c++
+constexpr auto parser = bp::int_ >> bp::double_;
+
+auto result = bp::parse("42 13.0", parser, bp::ws); // (1, 2)
+
+static_assert(std::same_as<
+    decltype(result),
+    std::optional<bp::tuple<int, double>>>);        // (3)
+
+assert(result);
+assert(*result == bp::tuple(42, 13.0));
+```
+
+----
+
+If the parser that you pass to `parse()` has no attribute, `parse()` returns a
+`bool`.
+
+----
+
+You can also pass an attribute out-argument to `parse()`.
+
+```c++
+constexpr auto parser = bp::int_ >> bp::double_;
+
+bp::tuple<int, double> result;
+bool success = bp::parse("42 13.0", parser, bp::ws, result);
+
+assert(success);
+assert(result == bp::tuple(42, 13.0));
+```
+
+----
+
+The attribute out-arg does not have to be the same type as the parser's
+default attribute.
+
+
+```c++
+constexpr auto parser = bp::int_ >> bp::double_;
+
+bp::tuple<char32_t, float> result;
+bool success = bp::parse("42 13.0", parser, bp::ws, result);
+
+assert(success);
+assert(result == bp::tuple(char32_t(42), 13.0f));
+```
+
+----
+
+This is why each parser has two `call()` overloads.  One is for when the
+parser generates an attribute, and one is for when a parser is asked to fill
+in an attribute given as an out-arg.
+
+----
+
+```c++
+template<typename T> // int, long, etc.
+struct int_parser {
+    template<class I, class S>
+    T call(I & first, S last, ...) {
+        T retval;
+        call(first, last, ..., retval);
+        return retval;
+    }
+    template<class I, class S, class Attribute> // Not T!
+    void call(I & first, S last, ..., Attribute & attr) {
+        // Do parsing here; assign result to 'attr'.
+    }
+};
+```
+
+----
+
+SEMANTIC ACTIONS
+
+<!--
+A `rule` is a kind of parser that represents a unit of work in a larger
+parser.
+
+----
+
+The X3 rule problem, revisited.
+
+```c++
+namespace x3 = boost::spirit::x3;
+using ints_type = x3::rule<class ints, std::vector<int>>;
+BOOST_SPIRIT_DECLARE(ints_type);
+
+x3::rule<class ints, std::vector<int>> ints = "ints";
+constexpr auto ints_def = x3::int_ % ',';
+BOOST_SPIRIT_DEFINE(ints);
+```
+
+----
+
+```c++
+void foo() {
+    std::string input = "43, 42";
+    auto first = input.begin();
+    auto const last = input.end();
+    std::set<int> result;            // <-- Note this.
+    bool success = x3::phrase_parse(
+        first, last, ints, x3::space, result);
+    if (success) {
+        for (auto x : result)
+            std::cout << x << ' ';
+        std::cout << "\n";
+    }
+}
+```
+
+----
+
+There is no way to turn off the loose attribute matching X3, not even with a
+rule.
+
+Parser enforces the attribute type you give to a rule.
+
+When you write an exact type in your code, the rest of the code should honor
+that decision.
+
+----
+
+<ul>
+<li>Suffers from very long compile times.</li>
+<!-- .element: class="fragment" -->
+<li>Has error reporting that requires a lot of user intervention to work.</li>
+<!-- .element: class="fragment" -->
+<li>Requires user intervention, including a (long) recompile, to enable parse tracing.</li>
+</ul>
+
+Outline from proposal:
+
+Part 1: Justification for this library
+- Comparison with Spirit 2
+- Comparison with Spirit X3
+
+Part 2: A brief orientation
+- parsers
+- combining operators
+- attribute generation
+- rules
+
+Part 3: A deeper dive
+- getting attributes out of the parse
+- generated attributes
+- filled-in out-param attributes
+- callback parsing
+- parsing into aggregate structs (incl. struct-for-tuple and tuple-for-struct
+  replacements)
+- parsing into arbitrary class types
+- using rule parsers to concretize attribute types
+- Unicode support
+- Auto-generated diagnostics
+- auto-generated trace
+- turning ill-formed code into a runtime failure to ease debugging (this is a
+  really fun technique that sounds completely wrongheaded until you see it in
+  action!)
+
+Range-y stuff:
+
+Part 1: Overview of making a range
+- the view, and the V base_ it operates on
+- the range adaptor that makes the view
+- all_t, and its use in deduction guides
+- std::ranges::range_adaptor_closure and std::bind_back()
+
+Part 2: all_t
+- purpose is to adapt viewable_ranges to views (and not to touch views)
+- ref_view
+  - note ctors, base(), begin()/end(), no begin() const/end() const
+- owning_view
+  - note ctors, base(), begin()/end(), begin() const/end() const
+- the 'all' range adaptor
+  - can_ref_view
+
+Part 3: replace/replace_view
+- replace_view
+  - note ctors, base(), begin()/end(), begin() const/end() const
+  - replace_view::sentinel
+  - replace_view::iterator
+    - maybe_const
+    - op++, op*
+    - either_iterator, concatable
+- the 'replace' range adaptor
+  - R may be a viewable_range or a pointer to a null-terminated string
+  - same with the replacement
+  - can_replace_view
+  - to_range
+    - range_utf_format_v
+    - as_utfN
+    - is_bounded_array and null terminators
+
+- Hard-to-understand concept error messages due to non-const either_iterator::op*().
+-->
 
 ----
 
