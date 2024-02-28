@@ -223,7 +223,6 @@ assert(result == bp::tuple(42, 13.0));
 The attribute out-arg does not have to be the same type as the parser's
 default attribute.
 
-
 ```c++
 constexpr auto parser = bp::int_ >> bp::double_;
 
@@ -260,42 +259,394 @@ struct int_parser {
 
 ----
 
-SEMANTIC ACTIONS
-
-<!--
-A `rule` is a kind of parser that represents a unit of work in a larger
-parser.
+### Attribute generation
 
 ----
 
-The X3 rule problem, revisited.
+Let's talk briefly about what parsers Parser provides, and what semantic
+actions they produce.
+
+This is not a comprehensive list!
+<!-- .element: class="fragment" -->
+
+----
+
+Whitespace and related special parsers: `eps`, `eoi`, `eol`, `ws`, `blank`.
+The last two produce the matched character, the others no attribute at all.
+`eps` is often used as an anchor for a sematic action, and you can give it a
+condition like `eps(cond)`.
+
+----
+
+Character parsers.  Character classes: `control`, `digit`, `punct`,
+`hex_digit`, `lower`, `upper`.  Individual characters: `char_`, `char_('a')`,
+`char_('a', 'z')`, `char_("abcdef")`.  These each produce the single matched
+character.  The type of the character depends on the value type of the range
+parsed.
+
+----
+
+The string parser, `string("foo")`.  Matches the exact string given, and
+produces that string as a `std::string`.
+
+----
+
+The literal parsers.  `lit('c')`, `lit("str")`, or just `'c'` or `"str"` when
+used with an operator overload.  No attribute.
+
+----
+
+The numeric parsers `uint_`, `int_`, `double_`, etc.  Produce the type implied
+by the name.  You can specify the number of digits allowed for the integral
+type parsers.
+
+----
+
+Operations:
+
+```c++
+constexpr auto p00 = a >> b; // (or a > b) sequence; tuple
+constexpr auto p01 = a | b;  // alternative; variant
+constexpr auto p02 = *a;     // Kleene star; vector
+constexpr auto p03 = +a;     // one or more; vector
+```
+
+----
+
+```c++
+constexpr auto p04 = -a;    // zero or one/optional; optional
+constexpr auto p05 = a % b; // b-delimited list of a;
+                            // attribute of *a
+constexpr auto p06 = &a;    // assertion; no attribute
+constexpr auto p07 = !a;    // not-assertion; no attribute
+constexpr auto p08 = a - b; // !b >> a
+```
+
+----
+
+Attribute types collapse to prevent degeneracies, too.  `std::vector<none>`
+collapses to `none`.  `none` does not appear in a `tuple`.  `tuple<T>` becomes
+`T`. `tuple<>` becomes `none`.
+
+----
+
+```c++
+constexpr auto p09 = bp::int_;            // int
+constexpr auto p10 = bp::int_ >> bp::eps; // int
+```
+
+----
+
+```c++
+// tuple<int, double>
+constexpr auto p11 = bp::int_ >> bp::double_;
+// std::variant<int, double>
+constexpr auto p12 = bp::int_ | bp::double_;
+// std::optional<int>
+constexpr auto p13 = bp::int_ | bp::eps;
+```
+
+----
+
+```c++
+// std::vector<int>
+constexpr auto p14 = +bp::int_ >> bp::int_;
+```
+
+----
+
+There are a lot of rules for how attributes get generated.  Parser has tried
+to keep the set of rules manageable and easily-described.
+
+There are also rules about how a parser's generated attribute can be mapped
+onto an attribute out-arg given to that parser.
+<!-- .element: class="fragment" -->
+
+----
+
+An attribute `Attr attr` is "compatible" with an out-argument `Out & out` if:
+
+- `out = std::move(attr)` is well-formed;
+- `Attr` is a tuple, `Out` is an aggregate (or vice versa), and there is a mapping; or
+- `Attr` is a tuple, and `apply(Out::Out, attr)` is well-formed.
+
+----
+
+If `Out & out` is some kind of container (has `begin()`, `end()`, and
+`insert(pos, x)`), `Attr attr` is compatible if `Attr` is a container,
+optional, or container-in-an-optional whose `value_type` can be inserted into
+`out`.
+
+The insertion might use the notion of compatibility from the previous slide.
+<!-- .element: class="fragment" -->
+
+----
+
+Back to our initial example:
+
+```c++
+auto const result =
+    bp::parse(argv[1], bp::double_ % ',', bp::ws);
+if (result) {
+    for (double x : *result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+Out-arg instead:
+
+```c++
+std::vector<double> result;
+bool const success =
+    bp::parse(argv[1], bp::double_ % ',', bp::ws, result);
+if (success) {
+    for (double x : result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+Change the out-arg to a set:
+
+```c++
+std::set<double> result;
+bool const success =
+    bp::parse(argv[1], bp::double_ % ',', bp::ws, result);
+if (success) {
+    for (double x : result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+```c++
+struct thingy { int i; double d; };
+thingy t;
+bool const success = bp::parse(
+    "42 13.0", bp::int_ >> bp::double_, bp::ws, t);
+```
+
+----
+
+```c++
+struct other_thingy {
+    other_thingy() = default;
+    other_thingy(int i, double d) : i_(i), d_(d) {}
+private:
+    int i_;
+    double d_;
+};
+other_thingy ot;
+bool const success = bp::parse(
+    "42 13.0", bp::int_ >> bp::double_, bp::ws, ot);
+```
+
+----
+
+### Semantic actions
+
+----
+
+A semantic action is a function that gets attached to a parser, and gets
+called when the parser succeeds.
+
+----
+
+This is similar to how you can associate a bit of C code with a certain part
+of your parse in an extrinsic tool like `lex`/`flex`.
+
+From the GNU `flex` docs:
+```terminal
+%%
+username    printf( "%s", getlogin() );
+```
+
+----
+
+In Parser, you use `operator[]`.
+
+```c++
+constexpr auto parser_with_action = parser[action];
+```
+
+`action` must be some invocable.  Attaching an action makes the parser's
+attribute `none`.
+
+----
+
+The signature of a semantic action is usually `void (auto &)`:
+
+```c++
+auto action = [](auto & ctx) { /* ... */ };
+```
+
+There are more compact forms that apply to common cases of actions you use
+with rules, but the form here always works.
+
+----
+
+Here is a concrete example.
+
+```c++
+std::vector<double> result;
+auto push_back = [&](auto & ctx) {
+    result.push_back(_attr(ctx));
+};
+```
+
+----
+
+```c++
+bool const success = bp::parse(
+    argv[1], bp::double_[push_back] % ',', bp::ws);
+if (success) {
+    for (double x : result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+This is a completely different way to get attributes out of a parser -- via
+side effect.
+
+I don't recommend this.  It's much better to write parsers that produce the
+right attribute without your having to write semantic actions.
+<!-- .element: class="fragment" -->
+
+----
+
+Where you put the action is important.  The action for `bp::double_[a] % ','`
+is completely different from the one you'd use for `(bp::double_ % ',')[a]`.
+
+----
+
+### Rules
+
+----
+
+A rule is a kind of parser.  However, rules also have some extra features that
+other parsers do not.
+
+----
+
+A rule is associated with a tag-type.  The rule does its parse simply by
+calling a function called `parse_rule()`, using the associated tag-type.  The
+rule does not contain any parsers per se; the `parse_rule()` function must do
+the actual parsing.
+
+You don't need to define `parse_rule()` for a particular rule to use; there's
+a macro that does it.
+<!-- .element: class="fragment" -->
+
+----
+
+```c++
+// Defines the rule itself.  We still don't have the right
+// parse_rule() overloads yet.
+constexpr bp::rule<struct ints_tag, std::vector<int>> ints =
+    "a comma-delimited list of integers";
+
+// Defines a parser with a suspiciously similar name to the
+// rule above.  Still no parse_rule().
+constexpr auto ints_def = bp::int_ % ',';
+
+// Defines two overloads of parse_rule(); the first
+// parameter is int_tag *.  The body uses ints_def to
+// parse.
+BOOST_PARSER_DEFINE_RULES(ints)
+```
+
+----
+
+Since we defined our rule `ints` without any parsing logic in it, the logic we
+later use with `ints` is allowed to refer to `ints`.  This is how we enable
+recursive rules, and mutually recursive sets of rules.
+
+----
+
+There are other reasons to write rules.  You write a rule when you want to:
+
+- fix the attribute type produced by a parser to something other than the default;
+- create a parser that produces useful diagnostic text;
+- create a recursive rule;
+- create a set of mutually-recursive parsers; or
+- do callback parsing.
+
+----
+
+Perhaps the most important function of a rule is organizational.  I tend to
+write rules for the major parts of my big parsers.  I test each one in
+isolation, and build more complex parsers out of them.
+
+----
+
+Back to our initial example:
+
+```c++
+auto const result =
+    bp::parse(argv[1], bp::double_ % ',', bp::ws);
+if (result) {
+    for (double x : *result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+```c++
+std::set<int> result;
+bool const success =
+    bp::parse(argv[1], bp::double_ % ',', bp::ws, result);
+if (success) {
+    for (double x : result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+```c++
+std::set<int> result;
+// Error: ill-formed!
+bool const success =
+    bp::parse(argv[1], ints, bp::ws, result);
+if (success) {
+    for (double x : result)
+        std::cout << x << "\n";
+} else {
+    std::cout << "Parse failed.\n";
+}
+```
+
+----
+
+The Spirit X3 rule problem, revisited.
 
 ```c++
 namespace x3 = boost::spirit::x3;
 using ints_type = x3::rule<class ints, std::vector<int>>;
 BOOST_SPIRIT_DECLARE(ints_type);
 
-x3::rule<class ints, std::vector<int>> ints = "ints";
+ints_type ints = "ints";
 constexpr auto ints_def = x3::int_ % ',';
 BOOST_SPIRIT_DEFINE(ints);
-```
-
-----
-
-```c++
-void foo() {
-    std::string input = "43, 42";
-    auto first = input.begin();
-    auto const last = input.end();
-    std::set<int> result;            // <-- Note this.
-    bool success = x3::phrase_parse(
-        first, last, ints, x3::space, result);
-    if (success) {
-        for (auto x : result)
-            std::cout << x << ' ';
-        std::cout << "\n";
-    }
-}
 ```
 
 ----
@@ -310,14 +661,13 @@ that decision.
 
 ----
 
-<ul>
-<li>Suffers from very long compile times.</li>
-<!-- .element: class="fragment" -->
-<li>Has error reporting that requires a lot of user intervention to work.</li>
-<!-- .element: class="fragment" -->
-<li>Requires user intervention, including a (long) recompile, to enable parse tracing.</li>
-</ul>
+<!--
 
+TODO: directives (include repeat, if_, switch_, symbols)
+
+----
+
+<!--
 Outline from proposal:
 
 Part 1: Justification for this library
@@ -382,10 +732,6 @@ Part 3: replace/replace_view
 
 - Hard-to-understand concept error messages due to non-const either_iterator::op*().
 -->
-
-----
-
-
 
 ----
 
