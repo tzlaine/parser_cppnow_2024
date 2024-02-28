@@ -661,41 +661,97 @@ that decision.
 
 ----
 
-<!--
-
-TODO: directives (include repeat, if_, switch_, symbols)
+### Higher-order parsers
 
 ----
 
+TODO: repeat, if_, switch_, symbols
+
+----
+
+### Directives
+
+----
+
+TODO
+
+----
+
+### Unicode support
+
+----
+
+TODO
+
+----
+
+### Higher-order parsers
+
+----
+
+`repeat(n)[p]`
+`repeat(min, max)[p]`
+`if_(cond)`
+`switch_(x)(a, p1)(b, p2)`
+
+----
+
+### Directives
+
+----
+
+`omit[]`
+`raw[]`
+`string_view[]`
+`no_case[]`
+`lexeme[]`
+`skip[]`
+`merge[]`
+`separate[]`
+
+----
+
+### Unicode support
+
+----
+
+TODO
+
+----
+
+### Diagnostics
+
+----
+
+TODO
+
+----
+
+### Trace
+
+----
+
+TODO
+
+----
+
+### Debugging support
+
+----
+
+TODO
+
+----
+
+TODO
+
+----
+
+### Algorithms and ranges
+
+TODO
+
 <!--
-Outline from proposal:
-
-Part 1: Justification for this library
-- Comparison with Spirit 2
-- Comparison with Spirit X3
-
-Part 2: A brief orientation
-- parsers
-- combining operators
-- attribute generation
-- rules
-
-Part 3: A deeper dive
-- getting attributes out of the parse
-- generated attributes
-- filled-in out-param attributes
-- callback parsing
-- parsing into aggregate structs (incl. struct-for-tuple and tuple-for-struct
-  replacements)
-- parsing into arbitrary class types
-- using rule parsers to concretize attribute types
-- Unicode support
-- Auto-generated diagnostics
-- auto-generated trace
-- turning ill-formed code into a runtime failure to ease debugging (this is a
-  really fun technique that sounds completely wrongheaded until you see it in
-  action!)
-
 Range-y stuff:
 
 Part 1: Overview of making a range
