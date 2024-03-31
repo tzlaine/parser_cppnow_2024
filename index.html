@@ -307,8 +307,9 @@ Operations:
 ```c++
 constexpr auto p00 = a >> b; // (or a > b) sequence; tuple
 constexpr auto p01 = a | b;  // alternative; variant
-constexpr auto p02 = *a;     // Kleene star; vector
-constexpr auto p03 = +a;     // one or more; vector
+constexpr auto p02 = a || b; // permutation; tuple
+constexpr auto p03 = *a;     // Kleene star; vector
+constexpr auto p04 = +a;     // one or more; vector
 ```
 
 ----
@@ -665,49 +666,107 @@ that decision.
 
 ----
 
-TODO: repeat, if_, switch_, symbols
+- `repeat(n)[p]`
+- `repeat(min, max)[p]`
+
+These do what you expect; they match exactly `n` times, or no less than `min`
+times and no more than `max` times, respectively.
 
 ----
 
-### Directives
+`if_(cond)[p]`
+
+Applies `p` to the input if `cond` is `true`; fails to parse otherwise.
+Equivalent to `eps(cond) >> p`.
 
 ----
 
-TODO
-
-----
-
-### Unicode support
-
-----
-
-TODO
-
-----
-
-### Higher-order parsers
-
-----
-
-`repeat(n)[p]`
-`repeat(min, max)[p]`
-`if_(cond)`
 `switch_(x)(a, p1)(b, p2)`
 
+Applies `p1` if `x == a`, `p2` if `x == b`.  Equivalent to `eps(x == a) >> p1
+| eps(x == b) >> p2`.
+
+----
+
+In any of the higher-order parsers, the values and/or predicates can depend on
+the state of the parse.  The values are "resolved" at the point of evaluation.
+
+This means that if a value `X` is a callable that takes a context object, the
+resolved value is `X(ctx)`.  Otherwise, the value is just `X`.
+<!-- .element: class="fragment" -->
+
+----
+
+### Quoted string parser
+
+----
+
+- `quoted_string`
+- `quoted_string('!')`
+- `quoted_string("'\"")`
+- `quoted_string("'\"", symbols)`
+
+Matches a quoted string, using the given quote-character, or a list of
+possible quote characters, and an optional symbol table for escape sequences.
+
 ----
 
 ### Directives
 
 ----
 
-`omit[]`
-`raw[]`
-`string_view[]`
-`no_case[]`
-`lexeme[]`
-`skip[]`
-`merge[]`
-`separate[]`
+<ul>
+<li>`omit[p]`: Don't generate attributes</li>
+<li>`raw[p]`: Generate the subrange that `p` matches</li>
+<!-- .element: class="fragment" -->
+<li>`string_view[p]`: Generate the `std::basic_string_view&lt;CharT>` that `p` matches</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+<ul>
+<li>`no_case[p]`: Match case-insensitively (using Unicode case folding)</li>
+<li>`lexeme[p]`: Disable the skipper</li>
+<!-- .element: class="fragment" -->
+<li>`skip[p]`: Re-enable or change the skipper</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+<ul>
+<li>`merge[p]`: Force all subparsers to use the same attribute object</li>
+<li>`separate[p]`: Force all subparsers to use different attribute objects</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+```c++
+// Attribute type std::tuple<std::string, std::string>
+auto const parser1 = bp::string("abc") >> bp::string("def");
+```
+
+```c++
+// Attribute type std::string
+auto const parser2 =
+    bp::merge[bp::string("abc") >> bp::string("def")];
+```
+<!-- .element: class="fragment" -->
+
+----
+
+```c++
+// Attribute type std::vector<int>
+auto const parser1 = +bp::int_ >> bp::int_;
+```
+
+```c++
+// Attribute type std::tuple<std::vector<int>, int>
+auto const parser2 = bp::separate[+bp::int_ >> bp::int_];
+```
+<!-- .element: class="fragment" -->
 
 ----
 
