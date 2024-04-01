@@ -60,7 +60,8 @@ Spirit 2:
 
 Spirit X3:
 
-- Has rules that do not compose well -- the attributes produced by a rule can change depending on the context in which you use the rule
+- Has rules that do not compose well -- the attributes produced by a rule can
+  change depending on the context in which you use the rule
 <!-- .element: class="fragment" -->
 - Is missing many of the convenient interfaces to parsers that Spirit 2 had
 <!-- .element: class="fragment" -->
@@ -263,8 +264,8 @@ struct int_parser {
 
 ----
 
-Let's talk briefly about what parsers Parser provides, and what semantic
-actions they produce.
+Let's talk briefly about what parsers Parser provides, and what attributes
+they produce.
 
 This is not a comprehensive list!
 <!-- .element: class="fragment" -->
@@ -299,6 +300,12 @@ used with an operator overload.  No attribute.
 The numeric parsers `uint_`, `int_`, `double_`, etc.  Produce the type implied
 by the name.  You can specify the number of digits allowed for the integral
 type parsers.
+
+----
+
+There is also a symbol table parser.  It takes a canned set of symbols, and
+their associated values.  You can also add to the symbol table during the
+parse.
 
 ----
 
@@ -922,12 +929,12 @@ contract.
 This greatly helps with bugs like this:
 
 ```c++
-auto push_back = [](auto & ctx) {
-  _val(ctx).push_back(_attr(ctx));
+auto assign = [](auto & ctx) {
+  _val(ctx) = _attr(ctx);
 };
 
 // Well-formed *only* within a rule.
-auto parser = bp::char_[push_back];
+auto parser = bp::char_[assign];
 ```
 
 ----
@@ -947,7 +954,149 @@ help.
 
 ### Algorithms and ranges
 
-TODO
+----
+
+The `*parse()` overloads allow you to parse either the entire input, or a
+prefix of the input.  However, there ar cases when you might want to parse
+something in the middle.
+
+----
+
+A partial solution to this is to use the `search()` algorithm.
+
+```c++
+char const * str = "prefix 0, 1, 2, 3, 4 suffix";
+auto result = bp::search(str, bp::int_ % ',', bp::ws);
+assert(result.begin() == str + 1);
+assert(result.end() == str + 4);
+```
+
+----
+
+There's also a `search_all` range adaptor.
+
+```c++
+char const str[] = "prefix 0, 1, 2, 3, 4 suffix";
+auto r = str | bp::search_all(bp::int_, bp::ws);
+// Prints the numbers, with a newline after each.
+for (auto subrange : r) {
+    for (auto c : subrange) {
+        std::cout << c;
+    }
+    std::cout << "\n";
+}
+```
+
+----
+
+Other adaptors:
+
+<ul>
+<li>`split`</li>
+<li>`replace`</li>
+<!-- .element: class="fragment" -->
+<li>`transform_replace`</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+### Implmenting `transform_replace`
+
+----
+
+### Range adaptor primer
+
+----
+
+Range adaptors in the `<ranges>` work consist of views and range adaptors
+working together.
+
+The view does the work, but it only operates on some other `ranges::view`.
+We'll call this "`base`".
+<!-- .element: class="fragment" -->
+
+The range adaptor creates a `base` of type `V` for its associated view,
+possibly from a range, and then construct its associated view using `base`.
+<!-- .element: class="fragment" -->
+
+----
+
+```c++
+std::string_view sv = /*...*/;
+auto r1 = sv | bp::search_all(parser);
+
+std::string s = /*...*/;
+auto r2 = s | bp::search_all(parser);
+```
+
+----
+
+`all` and `all_t` help with the second case, since `std::string` is a
+non-`ranges::view`.
+
+`all_t` is an alias for `all()`.
+<!-- .element: class="fragment" -->
+
+```c++
+template<viewable_range R>
+using all_t = decltype(all(declval<R>()));
+```
+<!-- .element: class="fragment" -->
+
+----
+
+Curiously, the range adaptor does not use `all` and `all_t` directly.
+
+```c++
+template<typename V, typename Parser, typename GlobalState,
+         typename ErrorHandler, typename SkipParser>
+search_all_view(
+    V &&,
+    parser_interface<Parser, GlobalState, ErrorHandler>,
+    parser_interface<SkipParser>, trace)
+    -> search_all_view<
+        detail::text::detail::all_t<V>, // like ranges::all
+        Parser, GlobalState, ErrorHandler, SkipParser>;
+```
+
+----
+
+Typically the range adaptor uses something like `std::bind_back()` to gather
+up the arguments passed to it, and return some closure `C` with an associated
+`operator|` that accepts a range on the left and `C` on the right.
+
+```c++
+auto r1 = sv | bp::search_all(parser);
+```
+
+----
+
+### Implementing `all`
+
+----
+
+`all` must adapt three kinds of ranges:
+
+<ul>
+<li>`ranges::view`s</li>
+<li>lvalue `ranges::viewable_range`s</li>
+<!-- .element: class="fragment" -->
+<li>rvalue `ranges::viewable_range`s</li>
+<!-- .element: class="fragment" -->
+</ul>
+
+----
+
+`ranges::view`s are forwarded through unmodified.
+
+Lvalue `ranges::viewable_range`s are adapted using `ranges::ref_view`.
+<!-- .element: class="fragment" -->
+
+Rvalue `ranges::viewable_range`s are adapted using `ranges::owning_view`.
+<!-- .element: class="fragment" -->
+
+----
 
 <!--
 Range-y stuff:
