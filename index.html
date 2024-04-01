@@ -774,7 +774,64 @@ auto const parser2 = bp::separate[+bp::int_ >> bp::int_];
 
 ----
 
-TODO
+The `*parse()` overloads take a range of input whose value type must be a
+character type.  All the character types are supported.
+
+If the value type is `char`, no encoding is assumed.  If the value type is
+`char8_t`, `char16_t`, `char32_t`, or `wchar_t`, the input is assumed to be in
+the associated UTF.
+<!-- .element: class="fragment" -->
+
+An exception to this is if you pass a `parser::as_utfN_view` as the input.  In
+that case, the input is assumed to be whatever UTF-`N` the view implies,
+regardless of the value type.
+<!-- .element: class="fragment" -->
+
+----
+
+If the input is some UTF, the input is converted to UTF-32 using a
+`parser::utf32_view`.  If the input is `char`, it is left alone.
+
+There are two code paths in all the Unicode-aware parsers -- one for plain
+`char`s and one for Unicode.  Those parsers will often transcode some of their
+own state to UTF-32 in the Unicode path only.  In the non-Unicode path, no
+changes are made to the parser's state.
+<!-- .element: class="fragment" -->
+
+----
+
+All character comparisons are done via equality comparisons, sometimes with a
+conversion to a `common_type` first.
+
+----
+
+```c++
+auto parser = bp::char_(U'ô');
+
+char char_input[] = "ô";
+assert(!bp::parse(char_input, parser)); // No match.
+
+char8_t char8_input[] = u8"ô";
+assert(bp::parse(char8_input, parser)); // Match.
+```
+
+----
+
+All of the character classes (`ws`, `blank`, `digit`, etc.) are derived from
+Unicode properties.
+
+----
+
+Case-insensitive matching is done using Unicode case folding.
+
+----
+
+Unicode support is transparent; you don't have to do anything but provide
+non-`char` input.
+
+If you only need unencoded matching (i.e. `char`s), you don't pay for the
+Unicode support.
+<!-- .element: class="fragment" -->
 
 ----
 
@@ -782,7 +839,42 @@ TODO
 
 ----
 
-TODO
+Diagnotics are produced whenever an expectation is violated.  Expectations are
+indicated using `operator>`.
+
+```c++
+constexpr auto parser = '"' >> *(bp::char_ - '"') > '"';
+```
+
+----
+
+Consider this JSON file, "sample.json".
+
+```json
+{
+    "key": "value",
+    "foo": [, "bar": []
+}
+```
+
+----
+
+This is the output when you run a JSON parser written with Boost.Parser.
+
+```terminal
+sample.json:3:12: error: Expected ']' here:
+    "foo": [, "bar": []
+            ^
+```
+
+----
+
+Infinite lookahead/backtracking implies that expectation points are
+fundamental to good error reporting.
+
+----
+
+You can generate your own errors and even warnings inside semantic actions.
 
 ----
 
@@ -790,7 +882,26 @@ TODO
 
 ----
 
-TODO
+Trace can be enabled by passing an optional argument.  This can vary at
+runtime.
+
+```c++
+bp::parse(input, parser, bp::trace::on);
+```
+
+----
+
+```terminal
+[begin raw[lexeme[ >> ...]]; input="null"]
+  [begin lexeme[-char_('-') >> char_('1', '9') >> ... | ... >> ...]; input="null"]
+    [begin -char_('-') >> char_('1', '9') >> *digit | char_('0') >> -(char_('.') >> ...) >> -( >> ...); input="null"]
+      [begin -char_('-'); input="null"]
+        [begin char_('-'); input="null"]
+          no match
+        [end char_('-'); input="null"]
+        matched ""
+        attribute: <<empty>>
+```
 
 ----
 
@@ -798,11 +909,39 @@ TODO
 
 ----
 
-TODO
+Boost.Parser turns much of your ill-formed code well-formed in order to allow
+you to diagnose the problem using a debugger.
+
+It does this by returning a special, promiscuous type called `nope` from any
+the semantic action special functions, if that function is called out of
+contract.
+<!-- .element: class="fragment" -->
 
 ----
 
-TODO
+This greatly helps with bugs like this:
+
+```c++
+auto push_back = [](auto & ctx) {
+  _val(ctx).push_back(_attr(ctx));
+};
+
+// Well-formed *only* within a rule.
+auto parser = bp::char_[push_back];
+```
+
+----
+
+This kind of bug is very easy to write, and very easy to disagnose using a
+debugger.  It is very hard to diagnose just by reading diagnostics.
+
+This does not help you with other kinds of errors.  It only helps with errors
+inside of semantic actions.
+<!-- .element: class="fragment" -->
+
+Semantic actions are arbitrary code, so this is often where you need the most
+help.
+<!-- .element: class="fragment" -->
 
 ----
 
