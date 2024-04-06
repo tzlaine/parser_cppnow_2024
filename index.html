@@ -190,11 +190,11 @@ Once you have a parser, you use it by passing it to `parse()`.
 ```c++
 constexpr auto parser = bp::int_ >> bp::double_;
 
-auto result = bp::parse("42 13.0", parser, bp::ws); // (1, 2)
+auto result = bp::parse("42 13.0", parser, bp::ws);
 
 static_assert(std::same_as<
     decltype(result),
-    std::optional<bp::tuple<int, double>>>);        // (3)
+    std::optional<bp::tuple<int, double>>>);
 
 assert(result);
 assert(*result == bp::tuple(42, 13.0));
@@ -789,7 +789,7 @@ If the value type is `char`, no encoding is assumed.  If the value type is
 the associated UTF.
 <!-- .element: class="fragment" -->
 
-An exception to this is if you pass a `parser::as_utfN_view` as the input.  In
+An exception to this is if you pass a `parser::utfN_view` as the input.  In
 that case, the input is assumed to be whatever UTF-`N` the view implies,
 regardless of the value type.
 <!-- .element: class="fragment" -->
@@ -957,7 +957,7 @@ help.
 ----
 
 The `*parse()` overloads allow you to parse either the entire input, or a
-prefix of the input.  However, there ar cases when you might want to parse
+prefix of the input.  However, there are cases when you might want to parse
 something in the middle.
 
 ----
@@ -998,6 +998,253 @@ Other adaptors:
 <li>`transform_replace`</li>
 <!-- .element: class="fragment" -->
 </ul>
+
+----
+
+### Implementing a JSON parser
+
+----
+
+The docs contain an extended example, a JSON parser.
+
+----
+
+```c++
+// The JSON spec imposes a limit on how deeply JSON data
+// structures are allowed to nest.
+template<typename Iter>
+struct excessive_nesting : std::runtime_error
+{
+   excessive_nesting(Iter it) :
+       runtime_error("excessive_nesting"),
+       iter(it)
+   {}
+   Iter iter;
+};
+```
+
+----
+
+```c++
+// The only globals we need to parse JSON are: "How many data
+// structures deep are we?", and "What is the limit of open
+// data structures allowed?".
+struct global_state
+{
+    int recursive_open_count = 0;
+    int max_recursive_open_count = 0;
+};
+```
+
+----
+
+```c++
+// Initialize our globals to the current depth (0), and the max
+// depth (max_recursion).
+global_state globals{0, max_recursion};
+bp::callback_error_handler error_handler(errors_callback);
+// Make a new parser that includes the globals and error
+// handler.
+auto const parser = bp::with_error_handler(
+   bp::with_globals(value_p, globals), error_handler);
+```
+
+----
+
+```c++
+// When matching paired UTF-16 surrogates, we need to track a
+// bit of state between matching the first and second UTF-16
+// code units: namely, the value of the first code unit.
+struct double_escape_locals
+{
+    int first_surrogate = 0;
+};
+```
+
+----
+
+```c++
+bp::rule<class ws> const ws = "whitespace";
+
+bp::rule<class string_char, uint32_t> const string_char =
+    "code point (code points <= U+001F must be escaped)";
+bp::rule<class four_hex_digits, uint32_t> const hex_4 =
+    "four hexadecimal digits";
+bp::rule<class escape_seq, uint32_t> const escape_seq =
+    "\\uXXXX hexadecimal escape sequence";
+bp::rule<class escape_double_seq, uint32_t, double_escape_locals> const
+    escape_double_seq = "\\uXXXX hexadecimal escape sequence";
+bp::rule<class single_escaped_char, uint32_t> const single_escaped_char =
+    "'\"', '\\', '/', 'b', 'f', 'n', 'r', or 't'";
+```
+
+----
+
+```c++
+bp::rule<class null, value> const null = "null";
+bp::rule<class string, std::string> const string = "string";
+bp::rule<class number, double> const number = "number";
+bp::rule<class object_element, boost::parser::tuple<std::string, value>> const
+    object_element = "object-element";
+bp::rule<class object_tag, value> const object_p = "object";
+bp::rule<class array_tag, value> const array_p = "array";
+
+bp::rule<class value_tag, value> const value_p = "value";
+```
+
+----
+
+```c++
+auto const object_element_def = string > ':' > value_p;
+
+auto const object_p_def =
+    '{'_l[object_init] >>
+    -(object_element[object_insert] % ',') >
+    '}';
+```
+
+----
+
+```c++
+auto object_init = [](auto & ctx) {
+   auto & globals = _globals(ctx);
+   if (globals.max_recursive_open_count <
+       ++globals.recursive_open_count) {
+       throw excessive_nesting(_where(ctx).begin());
+   }
+   _val(ctx) = object();
+};
+```
+
+----
+
+```c++
+auto object_insert = [](auto & ctx) {
+   value & v = _val(ctx);
+   get<object>(v).insert(std::make_pair(
+       std::move(_attr(ctx))[0_c],
+       std::move(_attr(ctx)[1_c])));
+};
+```
+
+----
+
+List parsing follows the same pattern.
+
+----
+
+```c++
+auto const null_def = "null" >> bp::attr(value());
+```
+
+----
+
+```c++
+bp::symbols<uint32_t> const single_escaped_char_def = {
+   {"\"", 0x0022u},
+   {"\\", 0x005cu},
+   {"/", 0x002fu},
+   {"b", 0x0008u},
+   {"f", 0x000cu},
+   {"n", 0x000au},
+   {"r", 0x000du},
+   {"t", 0x0009u}};
+
+auto const string_char_def =
+    escape_double_seq | escape_seq |
+    ('\\'_l > single_escaped_char) |
+    (bp::cp - bp::char_(0x0000u, 0x001fu));
+```
+
+----
+
+```c++
+auto const string_def =
+    bp::lexeme['"' >> *(string_char - '"') > '"'];
+```
+
+----
+
+```c++
+auto const value_p_def =
+   number | bp::bool_ | null | string | array_p | object_p;
+```
+
+----
+
+### An important idiom for parser testability
+
+----
+
+Callback parsing allows you to write rules that produce values via callback.
+
+This is very useful for testing.
+<!-- .element: class="fragment" -->
+
+----
+
+You can define each rule, test it in isolation, including testing that its
+produced value is correct.
+
+Then you combine all your parsers into your top-level parser, using a set of
+callbacks to catch the results.
+<!-- .element: class="fragment" -->
+
+You can then test that this combination of parsers is also correct, by giving
+it a set of test-callbacks.
+<!-- .element: class="fragment" -->
+
+Then, without touching it at all, you can replace the testing callbacks with a
+set of callbacks that actually uses the results.
+<!-- .element: class="fragment" -->
+
+----
+
+This means that your parsing proper can be testing in isolation from its using
+code.  The using code's correctness is thus much easier to test.
+
+----
+
+```c++
+bp::callback_rule<class null_tag> const null = "null";
+bp::callback_rule<class bool_tag, bool> const bool_p = "boolean";
+bp::callback_rule<class string_tag, std::string> const string = "string";
+bp::callback_rule<class number_tag, double> const number = "number";
+```
+
+----
+
+```c++
+struct json_callbacks
+{
+    void operator()(json::null_tag) const
+    { std::cout << "JSON null value\n"; }
+    void operator()(json::bool_tag, bool b) const
+    {
+        indent();
+        std::cout << "JSON bool "
+                  << (b ? "true" : "false") << "\n";
+    }
+    // etc.
+};
+```
+
+----
+
+This separation of concerns makes it very convenient to make radical changes
+to your parser without touching the client code.
+
+----
+
+Callback parsing is also useful for very large parses.
+
+----
+
+## Questions?
+
+<span class="fragment fade-in">
+https://github.com/tzlaine/parser <br>
+</span>
 
 ----
 
