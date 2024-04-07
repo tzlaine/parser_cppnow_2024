@@ -33,11 +33,11 @@
 
 The short answer:
 
-Spirit 2 is great, but it is written using C++98 techology.  Spirit X3 is a
+Spirit 2 is great, but it is written using C++98 technology.  Spirit X3 is a
 modernized, experimental update that is not fully documented, but has a single
 design decision that makes it unusable for me.
 
-My love of these libraries and my frustration with this staus quo led to my
+My love of these libraries and my frustration with this status quo led to my
 writing Boost.Parser.
 <!-- .element: class="fragment" -->
 
@@ -92,7 +92,7 @@ So, the goal is to create a library in the same style as the Spirit libraries,
 updated for newer C++ standards.
 
 The new library should also try to improve and simplify the interface
-whererver possible.
+wherever possible.
 <!-- .element: class="fragment" -->
 
 Just as importantly, the new library must retain the fun.
@@ -180,7 +180,7 @@ constexpr auto parser = bp::int_ >> bp::double_;
 ----
 
 A parser might have no attribute associated with it.  It's attribute type is
-not `void`, but a special not-an-atribute type `none`.  The lack of
+not `void`, but a special not-an-attribute type `none`.  The lack of
 `void`-producing parsers keeps the Parser logic simpler.
 
 ----
@@ -274,7 +274,7 @@ This is not a comprehensive list!
 
 Whitespace and related special parsers: `eps`, `eoi`, `eol`, `ws`, `blank`.
 The last two produce the matched character, the others no attribute at all.
-`eps` is often used as an anchor for a sematic action, and you can give it a
+`eps` is often used as an anchor for a semantic action, and you can give it a
 condition like `eps(cond)`.
 
 ----
@@ -846,7 +846,7 @@ Unicode support.
 
 ----
 
-Diagnotics are produced whenever an expectation is violated.  Expectations are
+Diagnostics are produced whenever an expectation is violated.  Expectations are
 indicated using `operator>`.
 
 ```c++
@@ -939,7 +939,7 @@ auto parser = bp::char_[assign];
 
 ----
 
-This kind of bug is very easy to write, and very easy to disagnose using a
+This kind of bug is very easy to write, and very easy to diagnose using a
 debugger.  It is very hard to diagnose just by reading diagnostics.
 
 This does not help you with other kinds of errors.  It only helps with errors
@@ -1248,7 +1248,7 @@ https://github.com/tzlaine/parser <br>
 
 ----
 
-### Implmenting `transform_replace`
+### Implementing `transform_replace`
 
 ----
 
